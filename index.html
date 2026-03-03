@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <title>Fighter Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0d0d1a;
+      font-family: 'Courier New', monospace;
+      color: #eee;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #header {
+      padding: 10px 16px 6px;
+      text-align: center;
+      background: #0d0d1a;
+      border-bottom: 1px solid #1e1e3a;
+      flex-shrink: 0;
+    }
+
+    #header h1 {
+      font-size: 1rem;
+      letter-spacing: 6px;
+      color: #e94560;
+      text-shadow: 0 0 8px #e94560;
+    }
+
+    #canvas-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* ── Pose buttons ── */
+    #pose-bar {
+      display: flex;
+      gap: 6px;
+      padding: 8px 10px;
+      overflow-x: auto;
+      flex-shrink: 0;
+      background: #0d0d1a;
+      border-top: 1px solid #1e1e3a;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .pose-btn {
+      background: #16213e;
+      border: 1.5px solid #e94560;
+      color: #e94560;
+      font-family: 'Courier New', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 1px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+      touch-action: manipulation;
+    }
+
+    .pose-btn:hover, .pose-btn.active {
+      background: #e94560;
+      color: #fff;
+    }
+
+    #hint {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.65rem;
+      color: #555;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <h1>FIGHTER VIEWER</h1>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div id="hint">🖱 Drag to rotate · Scroll to zoom · 📱 Pinch to zoom</div>
+</div>
+
+<div id="pose-bar">
+  <button class="pose-btn active" data-pose="idle">Idle</button>
+  <button class="pose-btn" data-pose="guard">Guard</button>
+  <button class="pose-btn" data-pose="punch">Punch</button>
+  <button class="pose-btn" data-pose="kick">Kick</button>
+  <button class="pose-btn" data-pose="crouch">Crouch</button>
+  <button class="pose-btn" data-pose="jump">Jump</button>
+  <button class="pose-btn" data-pose="hadouken">Hadouken</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ─── Scene setup ─────────────────────────────────────────────
+const wrap   = document.getElementById('canvas-wrap');
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0d1a);
+scene.fog = new THREE.Fog(0x0d0d1a, 14, 22);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(0, 1.6, 5.5);
+
+// ─── Lights ──────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0x223366, 1.2);
+scene.add(ambient);
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+keyLight.position.set(3, 6, 4);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(1024, 1024);
+scene.add(keyLight);
+
+const rimLight = new THREE.DirectionalLight(0xe94560, 1.2);
+rimLight.position.set(-3, 3, -3);
+scene.add(rimLight);
+
+const fillLight = new THREE.DirectionalLight(0x4466ff, 0.6);
+fillLight.position.set(0, -2, 4);
+scene.add(fillLight);
+
+// ─── Ground ──────────────────────────────────────────────────
+const groundGeo = new THREE.CircleGeometry(3, 64);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x1a1a2e, roughness: 0.9, metalness: 0.1
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Ground ring
+const ringGeo = new THREE.RingGeometry(2.95, 3.05, 64);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xe94560, side: THREE.DoubleSide });
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = -Math.PI / 2;
+ring.position.y = 0.001;
+scene.add(ring);
+
+// ─── Helper: box segment ─────────────────────────────────────
+const MAT_BODY   = new THREE.MeshStandardMaterial({ color: 0x2255cc, roughness: 0.5, metalness: 0.3 });
+const MAT_HEAD   = new THREE.MeshStandardMaterial({ color: 0xf5c5a0, roughness: 0.6, metalness: 0.0 });
+const MAT_LIMB   = new THREE.MeshStandardMaterial({ color: 0x1a44aa, roughness: 0.5, metalness: 0.2 });
+const MAT_HAND   = new THREE.MeshStandardMaterial({ color: 0xf5c5a0, roughness: 0.6 });
+const MAT_SHOE   = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+const MAT_BELT   = new THREE.MeshStandardMaterial({ color: 0xe94560, roughness: 0.4, metalness: 0.5 });
+
+function box(w, h, d, mat) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.Mesh(g, mat);
+  m.castShadow = true;
+  return m;
+}
+
+// ─── Build character (pivot-based skeleton) ───────────────────
+//
+// Hierarchy (all positions in LOCAL parent space):
+//   root
+//   └─ hips
+//      ├─ torso
+//      │   ├─ head
+//      │   ├─ neck
+//      │   ├─ L_shoulder → L_upperArm → L_foreArm → L_hand
+//      │   └─ R_shoulder → R_upperArm → R_foreArm → R_hand
+//      ├─ L_hip → L_thigh → L_shin → L_foot
+//      └─ R_hip → R_thigh → R_shin → R_foot
+
+const root = new THREE.Group();
+scene.add(root);
+
+function makeJoint(name) {
+  const g = new THREE.Group();
+  g.name = name;
+  return g;
+}
+
+// — Hips —
+const hips = makeJoint('hips');
+hips.position.y = 1.0;
+root.add(hips);
+
+// — Torso —
+const torsoJoint = makeJoint('torsoJoint');
+torsoJoint.position.y = 0.0;
+hips.add(torsoJoint);
+const torsoMesh = box(0.55, 0.65, 0.28, MAT_BODY);
+torsoMesh.position.y = 0.325;
+torsoJoint.add(torsoMesh);
+
+// Belt
+const beltMesh = box(0.57, 0.07, 0.30, MAT_BELT);
+beltMesh.position.y = 0.04;
+torsoJoint.add(beltMesh);
+
+// — Neck —
+const neck = makeJoint('neck');
+neck.position.y = 0.66;
+torsoJoint.add(neck);
+const neckMesh = box(0.14, 0.12, 0.14, MAT_HEAD);
+neckMesh.position.y = 0.06;
+neck.add(neckMesh);
+
+// — Head —
+const headJoint = makeJoint('head');
+headJoint.position.y = 0.14;
+neck.add(headJoint);
+const headMesh = box(0.32, 0.35, 0.28, MAT_HEAD);
+headMesh.position.y = 0.175;
+headJoint.add(headMesh);
+
+// Eyes
+[-0.08, 0.08].forEach(x => {
+  const eye = box(0.055, 0.04, 0.01, new THREE.MeshStandardMaterial({ color: 0x111122 }));
+  eye.position.set(x, 0.22, 0.145);
+  headJoint.add(eye);
+});
+
+// — Arms factory —
+function makeArm(side) {
+  const sign = side === 'L' ? -1 : 1;
+  const shoulderJoint = makeJoint(`${side}_shoulder`);
+  shoulderJoint.position.set(sign * 0.32, 0.56, 0);
+  torsoJoint.add(shoulderJoint);
+
+  const upperArm = makeJoint(`${side}_upperArm`);
+  shoulderJoint.add(upperArm);
+  const uArmMesh = box(0.13, 0.34, 0.13, MAT_LIMB);
+  uArmMesh.position.y = -0.17;
+  upperArm.add(uArmMesh);
+
+  const foreArmJoint = makeJoint(`${side}_foreArm`);
+  foreArmJoint.position.y = -0.34;
+  upperArm.add(foreArmJoint);
+  const fArmMesh = box(0.11, 0.30, 0.11, MAT_LIMB);
+  fArmMesh.position.y = -0.15;
+  foreArmJoint.add(fArmMesh);
+
+  const handJoint = makeJoint(`${side}_hand`);
+  handJoint.position.y = -0.30;
+  foreArmJoint.add(handJoint);
+  const handMesh = box(0.13, 0.14, 0.10, MAT_HAND);
+  handMesh.position.y = -0.07;
+  handJoint.add(handMesh);
+
+  return { shoulderJoint, upperArm, foreArmJoint, handJoint };
+}
+
+const L = makeArm('L');
+const R = makeArm('R');
+
+// — Legs factory —
+function makeLeg(side) {
+  const sign = side === 'L' ? -1 : 1;
+  const hipJoint = makeJoint(`${side}_hip`);
+  hipJoint.position.set(sign * 0.16, 0, 0);
+  hips.add(hipJoint);
+
+  const thigh = makeJoint(`${side}_thigh`);
+  hipJoint.add(thigh);
+  const thighMesh = box(0.19, 0.42, 0.19, MAT_LIMB);
+  thighMesh.position.y = -0.21;
+  thigh.add(thighMesh);
+
+  const shinJoint = makeJoint(`${side}_shin`);
+  shinJoint.position.y = -0.42;
+  thigh.add(shinJoint);
+  const shinMesh = box(0.15, 0.40, 0.15, MAT_LIMB);
+  shinMesh.position.y = -0.20;
+  shinJoint.add(shinMesh);
+
+  const footJoint = makeJoint(`${side}_foot`);
+  footJoint.position.y = -0.40;
+  shinJoint.add(footJoint);
+  const footMesh = box(0.16, 0.10, 0.24, MAT_SHOE);
+  footMesh.position.set(0, -0.05, 0.06);
+  footJoint.add(footMesh);
+
+  return { hipJoint, thigh, shinJoint, footJoint };
+}
+
+const LL = makeLeg('L');
+const RL = makeLeg('R');
+
+// ─── Pose definitions ────────────────────────────────────────
+// Each pose: { joint: [rx, ry, rz] } in degrees
+const DEG = Math.PI / 180;
+
+const POSES = {
+  idle: {
+    hips:         [0, 0, 0],
+    torsoJoint:   [0, 0, 0],
+    headJoint:    [0, 0, 0],
+    L_shoulder:   [0, 0,  8],
+    L_upperArm:   [10, 0, 0],
+    L_foreArm:    [-5, 0, 0],
+    R_shoulder:   [0, 0, -8],
+    R_upperArm:   [10, 0, 0],
+    R_foreArm:    [-5, 0, 0],
+    L_hip:        [0, 0, 3],
+    L_thigh:      [3, 0, 0],
+    L_shin:       [-5, 0, 0],
+    R_hip:        [0, 0,-3],
+    R_thigh:      [3, 0, 0],
+    R_shin:       [-5, 0, 0],
+    hipsY: 1.0,
+  },
+
+  guard: {
+    hips:         [0, 0, 0],
+    torsoJoint:   [15, 0, 0],
+    headJoint:    [-15, 0, 0],
+    L_shoulder:   [0, 0, 10],
+    L_upperArm:   [60, 0, 0],
+    L_foreArm:    [-90, 0, 0],
+    R_shoulder:   [0, 0,-10],
+    R_upperArm:   [70, 0, 0],
+    R_foreArm:    [-100, 0, 0],
+    L_hip:        [0, 0, 3],
+    L_thigh:      [20, 0, 5],
+    L_shin:       [-30, 0, 0],
+    R_hip:        [0, 0,-3],
+    R_thigh:      [10, 0,-5],
+    R_shin:       [-15, 0, 0],
+    hipsY: 0.85,
+  },
+
+  punch: {
+    hips:         [0, -30, 0],
+    torsoJoint:   [0, 20, 0],
+    headJoint:    [0, -10, 0],
+    L_shoulder:   [0, 0, 10],
+    L_upperArm:   [-90, 0, 0],
+    L_foreArm:    [-10, 0, 0],
+    R_shoulder:   [0, 0,-15],
+    R_upperArm:   [50, 0, 0],
+    R_foreArm:    [-60, 0, 0],
+    L_hip:        [0, 0, 5],
+    L_thigh:      [15, 0, 5],
+    L_shin:       [-20, 0, 0],
+    R_hip:        [0, 0,-5],
+    R_thigh:      [5, 0,-5],
+    R_shin:       [-10, 0, 0],
+    hipsY: 0.9,
+  },
+
+  kick: {
+    hips:         [0, 15, 0],
+    torsoJoint:   [-5, 0, 0],
+    headJoint:    [5, 0, 0],
+    L_shoulder:   [0, 0, 20],
+    L_upperArm:   [30, 0, 0],
+    L_foreArm:    [-20, 0, 0],
+    R_shoulder:   [0, 0,-30],
+    R_upperArm:   [-20, 0, 0],
+    R_foreArm:    [-10, 0, 0],
+    L_hip:        [0, 0, 5],
+    L_thigh:      [10, 0, 5],
+    L_shin:       [-15, 0, 0],
+    R_hip:        [0, 0,-5],
+    R_thigh:      [-110, 0, 0],
+    R_shin:       [80, 0, 0],
+    hipsY: 1.05,
+  },
+
+  crouch: {
+    hips:         [0, 0, 0],
+    torsoJoint:   [10, 0, 0],
+    headJoint:    [-10, 0, 0],
+    L_shoulder:   [0, 0, 15],
+    L_upperArm:   [40, 0, 0],
+    L_foreArm:    [-70, 0, 0],
+    R_shoulder:   [0, 0,-15],
+    R_upperArm:   [40, 0, 0],
+    R_foreArm:    [-70, 0, 0],
+    L_hip:        [0, 0, 5],
+    L_thigh:      [80, 0, 8],
+    L_shin:       [-110, 0, 0],
+    R_hip:        [0, 0,-5],
+    R_thigh:      [80, 0,-8],
+    R_shin:       [-110, 0, 0],
+    hipsY: 0.55,
+  },
+
+  jump: {
+    hips:         [0, 0, 0],
+    torsoJoint:   [-5, 0, 0],
+    headJoint:    [5, 0, 0],
+    L_shoulder:   [0, 0, 15],
+    L_upperArm:   [-60, 0, 0],
+    L_foreArm:    [-30, 0, 0],
+    R_shoulder:   [0, 0,-15],
+    R_upperArm:   [-60, 0, 0],
+    R_foreArm:    [-30, 0, 0],
+    L_hip:        [0, 0, 5],
+    L_thigh:      [-30, 0, 5],
+    L_shin:       [50, 0, 0],
+    R_hip:        [0, 0,-5],
+    R_thigh:      [-30, 0,-5],
+    R_shin:       [50, 0, 0],
+    hipsY: 1.5,
+  },
+
+  hadouken: {
+    hips:         [0, -20, 0],
+    torsoJoint:   [0, 10, 0],
+    headJoint:    [0, -5, 0],
+    L_shoulder:   [0, 0, 10],
+    L_upperArm:   [-60, 0, 0],
+    L_foreArm:    [-70, 0, 0],
+    R_shoulder:   [0, 0,-10],
+    R_upperArm:   [-70, 0, 0],
+    R_foreArm:    [-60, 0, 0],
+    L_hip:        [0, 0, 5],
+    L_thigh:      [20, 0, 8],
+    L_shin:       [-30, 0, 0],
+    R_hip:        [0, 0,-5],
+    R_thigh:      [10, 0,-5],
+    R_shin:       [-15, 0, 0],
+    hipsY: 0.88,
+  },
+};
+
+// ─── Apply pose with tween ────────────────────────────────────
+const joints = {};
+root.traverse(obj => { if (obj.name) joints[obj.name] = obj; });
+
+let currentPoseData = POSES.idle;
+let targetPoseData  = POSES.idle;
+let tweenT = 1;
+
+function setPose(name) {
+  targetPoseData = POSES[name];
+  tweenT = 0;
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+function applyPoseInterp(t) {
+  const e = easeOut(t);
+  for (const key of Object.keys(targetPoseData)) {
+    if (key === 'hipsY') {
+      hips.position.y = lerp(currentPoseData.hipsY, targetPoseData.hipsY, e);
+      continue;
+    }
+    const j = joints[key];
+    if (!j) continue;
+    const from = currentPoseData[key] || [0,0,0];
+    const to   = targetPoseData[key]  || [0,0,0];
+    j.rotation.x = lerp(from[0], to[0], e) * DEG;
+    j.rotation.y = lerp(from[1], to[1], e) * DEG;
+    j.rotation.z = lerp(from[2], to[2], e) * DEG;
+  }
+}
+
+// ─── Orbit control (mouse + touch) ───────────────────────────
+let orbitTheta = 0, orbitPhi = 20 * DEG;
+let orbitRadius = 5.5;
+const MIN_PHI = -20 * DEG, MAX_PHI = 70 * DEG;
+const MIN_R = 2.5, MAX_R = 10;
+
+let dragging = false, lastX = 0, lastY = 0;
+
+wrap.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener('mouseup',   () => { dragging = false; });
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  orbitTheta -= (e.clientX - lastX) * 0.008;
+  orbitPhi   -= (e.clientY - lastY) * 0.006;
+  orbitPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, orbitPhi));
+  lastX = e.clientX; lastY = e.clientY;
+});
+
+wrap.addEventListener('wheel', e => {
+  orbitRadius = Math.max(MIN_R, Math.min(MAX_R, orbitRadius + e.deltaY * 0.005));
+  e.preventDefault();
+}, { passive: false });
+
+// Touch orbit
+let touchLast = null, pinchLast = null;
+
+wrap.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    touchLast = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    pinchLast = null;
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchLast = Math.hypot(dx, dy);
+    touchLast = null;
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && touchLast) {
+    const dx = e.touches[0].clientX - touchLast.x;
+    const dy = e.touches[0].clientY - touchLast.y;
+    orbitTheta -= dx * 0.008;
+    orbitPhi   -= dy * 0.006;
+    orbitPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, orbitPhi));
+    touchLast = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  } else if (e.touches.length === 2 && pinchLast !== null) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    orbitRadius = Math.max(MIN_R, Math.min(MAX_R, orbitRadius - (dist - pinchLast) * 0.02));
+    pinchLast = dist;
+  }
+}, { passive: false });
+
+// ─── Idle breathing animation ─────────────────────────────────
+let breathT = 0;
+
+// ─── Resize ──────────────────────────────────────────────────
+function resize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── Render loop ─────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+
+  // Tween pose
+  if (tweenT < 1) {
+    tweenT = Math.min(1, tweenT + dt * 3.5);
+    applyPoseInterp(tweenT);
+    if (tweenT >= 1) currentPoseData = targetPoseData;
+  }
+
+  // Subtle breathing on idle joints
+  breathT += dt;
+  if (tweenT >= 1) {
+    const breath = Math.sin(breathT * 1.5) * 0.015;
+    torsoJoint.rotation.x += breath;
+  }
+
+  // Orbit camera
+  const camX = orbitRadius * Math.sin(orbitTheta) * Math.cos(orbitPhi);
+  const camY = orbitRadius * Math.sin(orbitPhi) + 1.2;
+  const camZ = orbitRadius * Math.cos(orbitTheta) * Math.cos(orbitPhi);
+  camera.position.set(camX, camY, camZ);
+  camera.lookAt(0, 1.2, 0);
+
+  renderer.render(scene, camera);
+});
+
+// ─── Pose buttons ────────────────────────────────────────────
+document.querySelectorAll('.pose-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.pose-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    setPose(btn.dataset.pose);
+  });
+});
+</script>
+</body>
+</html>
