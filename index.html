@@ -146,7 +146,9 @@ const rimLight = new THREE.DirectionalLight(0xe94560, 1.4);
 rimLight.position.set(-4, 4, -3);
 scene.add(rimLight);
 
-scene.add(Object.assign(new THREE.DirectionalLight(0x4466ff, 0.7), { position: new THREE.Vector3(0, -2, 5) }));
+const fillLight = new THREE.DirectionalLight(0x4466ff, 0.7);
+fillLight.position.set(0, -2, 5);
+scene.add(fillLight);
 
 // ─── Ground ───────────────────────────────────────────────────
 const ground = new THREE.Mesh(
