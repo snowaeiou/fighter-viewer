@@ -41,7 +41,6 @@
 
     canvas { display: block; width: 100%; height: 100%; }
 
-    /* ── Pose buttons ── */
     #pose-bar {
       display: flex;
       gap: 6px;
@@ -74,6 +73,11 @@
       color: #fff;
     }
 
+    /* stance = hold, action = fires once then returns */
+    .pose-btn[data-type="action"] { border-color: #ffaa00; color: #ffaa00; }
+    .pose-btn[data-type="action"]:hover,
+    .pose-btn[data-type="action"].active { background: #ffaa00; color: #111; }
+
     #hint {
       position: absolute;
       bottom: 10px;
@@ -94,17 +98,20 @@
 
 <div id="canvas-wrap">
   <canvas id="c"></canvas>
-  <div id="hint">🖱 Drag to rotate · Scroll to zoom · 📱 Pinch to zoom</div>
+  <div id="hint">🖱 Drag to rotate · Scroll/Pinch to zoom</div>
 </div>
 
 <div id="pose-bar">
-  <button class="pose-btn active" data-pose="idle">Idle</button>
-  <button class="pose-btn" data-pose="guard">Guard</button>
-  <button class="pose-btn" data-pose="punch">Punch</button>
-  <button class="pose-btn" data-pose="kick">Kick</button>
-  <button class="pose-btn" data-pose="crouch">Crouch</button>
-  <button class="pose-btn" data-pose="jump">Jump</button>
-  <button class="pose-btn" data-pose="hadouken">Hadouken</button>
+  <!-- Stances (hold) -->
+  <button class="pose-btn active" data-pose="idle"     data-type="stance">Idle</button>
+  <button class="pose-btn"        data-pose="guard"    data-type="stance">Guard</button>
+  <button class="pose-btn"        data-pose="crouch"   data-type="stance">Crouch</button>
+  <!-- Actions (fire & return) -->
+  <button class="pose-btn"        data-pose="punch"    data-type="action">⚡ Punch</button>
+  <button class="pose-btn"        data-pose="kick"     data-type="action">⚡ Kick</button>
+  <button class="pose-btn"        data-pose="uppercut" data-type="action">⚡ Uppercut</button>
+  <button class="pose-btn"        data-pose="jump"     data-type="action">⚡ Jump</button>
+  <button class="pose-btn"        data-pose="hadouken" data-type="action">⚡ Hadouken</button>
 </div>
 
 <script type="importmap">
@@ -117,10 +124,10 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ─── Scene setup ─────────────────────────────────────────────
-const wrap   = document.getElementById('canvas-wrap');
-const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+// ─── Scene ───────────────────────────────────────────────────
+const wrap     = document.getElementById('canvas-wrap');
+const canvas   = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -133,86 +140,66 @@ const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
 camera.position.set(0, 1.6, 5.5);
 
 // ─── Lights ──────────────────────────────────────────────────
-const ambient = new THREE.AmbientLight(0x223366, 1.2);
-scene.add(ambient);
+scene.add(new THREE.AmbientLight(0x223366, 1.2));
 
-const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
-keyLight.position.set(3, 6, 4);
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
+keyLight.position.set(3, 7, 4);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(1024, 1024);
 scene.add(keyLight);
 
-const rimLight = new THREE.DirectionalLight(0xe94560, 1.2);
-rimLight.position.set(-3, 3, -3);
+const rimLight = new THREE.DirectionalLight(0xe94560, 1.4);
+rimLight.position.set(-4, 4, -3);
 scene.add(rimLight);
 
-const fillLight = new THREE.DirectionalLight(0x4466ff, 0.6);
-fillLight.position.set(0, -2, 4);
+const fillLight = new THREE.DirectionalLight(0x4466ff, 0.7);
+fillLight.position.set(0, -2, 5);
 scene.add(fillLight);
 
 // ─── Ground ──────────────────────────────────────────────────
-const groundGeo = new THREE.CircleGeometry(3, 64);
-const groundMat = new THREE.MeshStandardMaterial({
-  color: 0x1a1a2e, roughness: 0.9, metalness: 0.1
-});
-const ground = new THREE.Mesh(groundGeo, groundMat);
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(3, 64),
+  new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.9 })
+);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Ground ring
-const ringGeo = new THREE.RingGeometry(2.95, 3.05, 64);
-const ringMat = new THREE.MeshBasicMaterial({ color: 0xe94560, side: THREE.DoubleSide });
-const ring = new THREE.Mesh(ringGeo, ringMat);
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(2.95, 3.05, 64),
+  new THREE.MeshBasicMaterial({ color: 0xe94560, side: THREE.DoubleSide })
+);
 ring.rotation.x = -Math.PI / 2;
 ring.position.y = 0.001;
 scene.add(ring);
 
-// ─── Helper: box segment ─────────────────────────────────────
-const MAT_BODY   = new THREE.MeshStandardMaterial({ color: 0x2255cc, roughness: 0.5, metalness: 0.3 });
-const MAT_HEAD   = new THREE.MeshStandardMaterial({ color: 0xf5c5a0, roughness: 0.6, metalness: 0.0 });
-const MAT_LIMB   = new THREE.MeshStandardMaterial({ color: 0x1a44aa, roughness: 0.5, metalness: 0.2 });
-const MAT_HAND   = new THREE.MeshStandardMaterial({ color: 0xf5c5a0, roughness: 0.6 });
-const MAT_SHOE   = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
-const MAT_BELT   = new THREE.MeshStandardMaterial({ color: 0xe94560, roughness: 0.4, metalness: 0.5 });
+// ─── Materials ───────────────────────────────────────────────
+const MAT_BODY = new THREE.MeshStandardMaterial({ color: 0x2255cc, roughness: 0.45, metalness: 0.3 });
+const MAT_HEAD = new THREE.MeshStandardMaterial({ color: 0xf5c5a0, roughness: 0.6 });
+const MAT_LIMB = new THREE.MeshStandardMaterial({ color: 0x1a44aa, roughness: 0.5, metalness: 0.2 });
+const MAT_HAND = new THREE.MeshStandardMaterial({ color: 0xf5c5a0, roughness: 0.6 });
+const MAT_SHOE = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+const MAT_BELT = new THREE.MeshStandardMaterial({ color: 0xe94560, roughness: 0.4, metalness: 0.5 });
 
 function box(w, h, d, mat) {
-  const g = new THREE.BoxGeometry(w, h, d);
-  const m = new THREE.Mesh(g, mat);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.castShadow = true;
   return m;
 }
 
-// ─── Build character (pivot-based skeleton) ───────────────────
-//
-// Hierarchy (all positions in LOCAL parent space):
-//   root
-//   └─ hips
-//      ├─ torso
-//      │   ├─ head
-//      │   ├─ neck
-//      │   ├─ L_shoulder → L_upperArm → L_foreArm → L_hand
-//      │   └─ R_shoulder → R_upperArm → R_foreArm → R_hand
-//      ├─ L_hip → L_thigh → L_shin → L_foot
-//      └─ R_hip → R_thigh → R_shin → R_foot
-
+// ─── Skeleton ────────────────────────────────────────────────
 const root = new THREE.Group();
 scene.add(root);
 
-function makeJoint(name) {
-  const g = new THREE.Group();
-  g.name = name;
-  return g;
-}
+function joint(name) { const g = new THREE.Group(); g.name = name; return g; }
 
-// — Hips —
-const hips = makeJoint('hips');
+// Hips
+const hips = joint('hips');
 hips.position.y = 1.0;
 root.add(hips);
 
-// — Torso —
-const torsoJoint = makeJoint('torsoJoint');
-torsoJoint.position.y = 0.0;
+// Torso
+const torsoJoint = joint('torsoJoint');
 hips.add(torsoJoint);
 const torsoMesh = box(0.55, 0.65, 0.28, MAT_BODY);
 torsoMesh.position.y = 0.325;
@@ -223,282 +210,266 @@ const beltMesh = box(0.57, 0.07, 0.30, MAT_BELT);
 beltMesh.position.y = 0.04;
 torsoJoint.add(beltMesh);
 
-// — Neck —
-const neck = makeJoint('neck');
+// Neck
+const neck = joint('neck');
 neck.position.y = 0.66;
 torsoJoint.add(neck);
 const neckMesh = box(0.14, 0.12, 0.14, MAT_HEAD);
 neckMesh.position.y = 0.06;
 neck.add(neckMesh);
 
-// — Head —
-const headJoint = makeJoint('head');
+// Head
+const headJoint = joint('head');
 headJoint.position.y = 0.14;
 neck.add(headJoint);
 const headMesh = box(0.32, 0.35, 0.28, MAT_HEAD);
 headMesh.position.y = 0.175;
 headJoint.add(headMesh);
-
-// Eyes
 [-0.08, 0.08].forEach(x => {
   const eye = box(0.055, 0.04, 0.01, new THREE.MeshStandardMaterial({ color: 0x111122 }));
   eye.position.set(x, 0.22, 0.145);
   headJoint.add(eye);
 });
 
-// — Arms factory —
+// Arms
 function makeArm(side) {
-  const sign = side === 'L' ? -1 : 1;
-  const shoulderJoint = makeJoint(`${side}_shoulder`);
-  shoulderJoint.position.set(sign * 0.32, 0.56, 0);
-  torsoJoint.add(shoulderJoint);
+  const s = side === 'L' ? -1 : 1;
+  const sh = joint(`${side}_shoulder`);
+  sh.position.set(s * 0.32, 0.56, 0);
+  torsoJoint.add(sh);
 
-  const upperArm = makeJoint(`${side}_upperArm`);
-  shoulderJoint.add(upperArm);
-  const uArmMesh = box(0.13, 0.34, 0.13, MAT_LIMB);
-  uArmMesh.position.y = -0.17;
-  upperArm.add(uArmMesh);
+  const ua = joint(`${side}_upperArm`);
+  sh.add(ua);
+  const uam = box(0.13, 0.34, 0.13, MAT_LIMB);
+  uam.position.y = -0.17;
+  ua.add(uam);
 
-  const foreArmJoint = makeJoint(`${side}_foreArm`);
-  foreArmJoint.position.y = -0.34;
-  upperArm.add(foreArmJoint);
-  const fArmMesh = box(0.11, 0.30, 0.11, MAT_LIMB);
-  fArmMesh.position.y = -0.15;
-  foreArmJoint.add(fArmMesh);
+  const fa = joint(`${side}_foreArm`);
+  fa.position.y = -0.34;
+  ua.add(fa);
+  const fam = box(0.11, 0.30, 0.11, MAT_LIMB);
+  fam.position.y = -0.15;
+  fa.add(fam);
 
-  const handJoint = makeJoint(`${side}_hand`);
-  handJoint.position.y = -0.30;
-  foreArmJoint.add(handJoint);
-  const handMesh = box(0.13, 0.14, 0.10, MAT_HAND);
-  handMesh.position.y = -0.07;
-  handJoint.add(handMesh);
+  const ha = joint(`${side}_hand`);
+  ha.position.y = -0.30;
+  fa.add(ha);
+  const ham = box(0.13, 0.14, 0.10, MAT_HAND);
+  ham.position.y = -0.07;
+  ha.add(ham);
 
-  return { shoulderJoint, upperArm, foreArmJoint, handJoint };
+  return { sh, ua, fa, ha };
 }
-
 const L = makeArm('L');
 const R = makeArm('R');
 
-// — Legs factory —
+// Legs
 function makeLeg(side) {
-  const sign = side === 'L' ? -1 : 1;
-  const hipJoint = makeJoint(`${side}_hip`);
-  hipJoint.position.set(sign * 0.16, 0, 0);
-  hips.add(hipJoint);
+  const s = side === 'L' ? -1 : 1;
+  const hip = joint(`${side}_hip`);
+  hip.position.set(s * 0.16, 0, 0);
+  hips.add(hip);
 
-  const thigh = makeJoint(`${side}_thigh`);
-  hipJoint.add(thigh);
-  const thighMesh = box(0.19, 0.42, 0.19, MAT_LIMB);
-  thighMesh.position.y = -0.21;
-  thigh.add(thighMesh);
+  const th = joint(`${side}_thigh`);
+  hip.add(th);
+  const thm = box(0.19, 0.42, 0.19, MAT_LIMB);
+  thm.position.y = -0.21;
+  th.add(thm);
 
-  const shinJoint = makeJoint(`${side}_shin`);
-  shinJoint.position.y = -0.42;
-  thigh.add(shinJoint);
-  const shinMesh = box(0.15, 0.40, 0.15, MAT_LIMB);
-  shinMesh.position.y = -0.20;
-  shinJoint.add(shinMesh);
+  const sh = joint(`${side}_shin`);
+  sh.position.y = -0.42;
+  th.add(sh);
+  const shm = box(0.15, 0.40, 0.15, MAT_LIMB);
+  shm.position.y = -0.20;
+  sh.add(shm);
 
-  const footJoint = makeJoint(`${side}_foot`);
-  footJoint.position.y = -0.40;
-  shinJoint.add(footJoint);
-  const footMesh = box(0.16, 0.10, 0.24, MAT_SHOE);
-  footMesh.position.set(0, -0.05, 0.06);
-  footJoint.add(footMesh);
+  const fo = joint(`${side}_foot`);
+  fo.position.y = -0.40;
+  sh.add(fo);
+  const fom = box(0.16, 0.10, 0.24, MAT_SHOE);
+  fom.position.set(0, -0.05, 0.06);
+  fo.add(fom);
 
-  return { hipJoint, thigh, shinJoint, footJoint };
+  return { hip, th, sh, fo };
 }
-
 const LL = makeLeg('L');
 const RL = makeLeg('R');
 
-// ─── Pose definitions ────────────────────────────────────────
-// Each pose: { joint: [rx, ry, rz] } in degrees
+// ─── Joints map ──────────────────────────────────────────────
+const joints = {};
+root.traverse(o => { if (o.name) joints[o.name] = o; });
+
+// ─── Pose library ─────────────────────────────────────────────
+// Each pose: joint name → [rx, ry, rz] in degrees
+// returnToIdle: true = action (fires then returns after holdMs)
+// tweenInSpeed: how fast the snap-in is (higher = snappier)
 const DEG = Math.PI / 180;
 
 const POSES = {
   idle: {
-    hips:         [0, 0, 0],
-    torsoJoint:   [0, 0, 0],
-    headJoint:    [0, 0, 0],
-    L_shoulder:   [0, 0,  8],
-    L_upperArm:   [10, 0, 0],
-    L_foreArm:    [-5, 0, 0],
-    R_shoulder:   [0, 0, -8],
-    R_upperArm:   [10, 0, 0],
-    R_foreArm:    [-5, 0, 0],
-    L_hip:        [0, 0, 3],
-    L_thigh:      [3, 0, 0],
-    L_shin:       [-5, 0, 0],
-    R_hip:        [0, 0,-3],
-    R_thigh:      [3, 0, 0],
-    R_shin:       [-5, 0, 0],
-    hipsY: 1.0,
+    hipsY: 1.0, returnToIdle: false, tweenInSpeed: 4,
+    hips: [0,0,0], torsoJoint: [0,0,0], head: [0,0,0],
+    L_shoulder: [0,0,8],   L_upperArm: [10,0,0],   L_foreArm: [-5,0,0],
+    R_shoulder: [0,0,-8],  R_upperArm: [10,0,0],   R_foreArm: [-5,0,0],
+    L_hip: [0,0,3],  L_thigh: [3,0,0],   L_shin: [-5,0,0],
+    R_hip: [0,0,-3], R_thigh: [3,0,0],   R_shin: [-5,0,0],
   },
 
   guard: {
-    hips:         [0, 0, 0],
-    torsoJoint:   [15, 0, 0],
-    headJoint:    [-15, 0, 0],
-    L_shoulder:   [0, 0, 10],
-    L_upperArm:   [60, 0, 0],
-    L_foreArm:    [-90, 0, 0],
-    R_shoulder:   [0, 0,-10],
-    R_upperArm:   [70, 0, 0],
-    R_foreArm:    [-100, 0, 0],
-    L_hip:        [0, 0, 3],
-    L_thigh:      [20, 0, 5],
-    L_shin:       [-30, 0, 0],
-    R_hip:        [0, 0,-3],
-    R_thigh:      [10, 0,-5],
-    R_shin:       [-15, 0, 0],
-    hipsY: 0.85,
-  },
-
-  punch: {
-    hips:         [0, -30, 0],
-    torsoJoint:   [0, 20, 0],
-    headJoint:    [0, -10, 0],
-    L_shoulder:   [0, 0, 10],
-    L_upperArm:   [-90, 0, 0],
-    L_foreArm:    [-10, 0, 0],
-    R_shoulder:   [0, 0,-15],
-    R_upperArm:   [50, 0, 0],
-    R_foreArm:    [-60, 0, 0],
-    L_hip:        [0, 0, 5],
-    L_thigh:      [15, 0, 5],
-    L_shin:       [-20, 0, 0],
-    R_hip:        [0, 0,-5],
-    R_thigh:      [5, 0,-5],
-    R_shin:       [-10, 0, 0],
-    hipsY: 0.9,
-  },
-
-  kick: {
-    hips:         [0, 15, 0],
-    torsoJoint:   [-5, 0, 0],
-    headJoint:    [5, 0, 0],
-    L_shoulder:   [0, 0, 20],
-    L_upperArm:   [30, 0, 0],
-    L_foreArm:    [-20, 0, 0],
-    R_shoulder:   [0, 0,-30],
-    R_upperArm:   [-20, 0, 0],
-    R_foreArm:    [-10, 0, 0],
-    L_hip:        [0, 0, 5],
-    L_thigh:      [10, 0, 5],
-    L_shin:       [-15, 0, 0],
-    R_hip:        [0, 0,-5],
-    R_thigh:      [-110, 0, 0],
-    R_shin:       [80, 0, 0],
-    hipsY: 1.05,
+    hipsY: 0.85, returnToIdle: false, tweenInSpeed: 5,
+    hips: [0,0,0], torsoJoint: [18,0,0], head: [-18,0,0],
+    L_shoulder: [0,0,12],  L_upperArm: [65,0,0],   L_foreArm: [-100,0,0],
+    R_shoulder: [0,0,-12], R_upperArm: [75,0,0],   R_foreArm: [-110,0,0],
+    L_hip: [0,0,4],  L_thigh: [22,0,6],  L_shin: [-35,0,0],
+    R_hip: [0,0,-4], R_thigh: [12,0,-6], R_shin: [-18,0,0],
   },
 
   crouch: {
-    hips:         [0, 0, 0],
-    torsoJoint:   [10, 0, 0],
-    headJoint:    [-10, 0, 0],
-    L_shoulder:   [0, 0, 15],
-    L_upperArm:   [40, 0, 0],
-    L_foreArm:    [-70, 0, 0],
-    R_shoulder:   [0, 0,-15],
-    R_upperArm:   [40, 0, 0],
-    R_foreArm:    [-70, 0, 0],
-    L_hip:        [0, 0, 5],
-    L_thigh:      [80, 0, 8],
-    L_shin:       [-110, 0, 0],
-    R_hip:        [0, 0,-5],
-    R_thigh:      [80, 0,-8],
-    R_shin:       [-110, 0, 0],
-    hipsY: 0.55,
+    hipsY: 0.50, returnToIdle: false, tweenInSpeed: 5,
+    hips: [0,0,0], torsoJoint: [12,0,0], head: [-12,0,0],
+    L_shoulder: [0,0,16],  L_upperArm: [45,0,0],   L_foreArm: [-75,0,0],
+    R_shoulder: [0,0,-16], R_upperArm: [45,0,0],   R_foreArm: [-75,0,0],
+    L_hip: [0,0,6],  L_thigh: [85,0,10],  L_shin: [-120,0,0],
+    R_hip: [0,0,-6], R_thigh: [85,0,-10], R_shin: [-120,0,0],
+  },
+
+  punch: {
+    hipsY: 0.92, returnToIdle: true, holdMs: 500, tweenInSpeed: 18,
+    hips: [0,-38,0], torsoJoint: [0,25,0], head: [0,-18,0],
+    // Lead arm FULLY extended with forward lunge
+    L_shoulder: [0,0,12],   L_upperArm: [-95,0,0],  L_foreArm: [0,0,0],
+    // Rear arm cocked back for power
+    R_shoulder: [0,0,-18],  R_upperArm: [65,0,0],   R_foreArm: [-80,0,0],
+    L_hip: [0,0,6],  L_thigh: [22,0,8],  L_shin: [-28,0,0],
+    R_hip: [0,0,-6], R_thigh: [8,0,-6],  R_shin: [-12,0,0],
+  },
+
+  kick: {
+    hipsY: 1.08, returnToIdle: true, holdMs: 550, tweenInSpeed: 16,
+    hips: [0,22,0], torsoJoint: [-8,0,0], head: [8,0,0],
+    // Arms wide for balance
+    L_shoulder: [0,0,25],  L_upperArm: [35,0,0],  L_foreArm: [-25,0,0],
+    R_shoulder: [0,0,-35], R_upperArm: [-25,0,0], R_foreArm: [-15,0,0],
+    L_hip: [0,0,6],  L_thigh: [14,0,8],   L_shin: [-20,0,0],
+    // Kick leg snaps up high
+    R_hip: [0,0,-8], R_thigh: [-125,0,0], R_shin: [90,0,0],
+  },
+
+  uppercut: {
+    hipsY: 1.05, returnToIdle: true, holdMs: 500, tweenInSpeed: 20,
+    hips: [0,-15,0], torsoJoint: [-20,10,0], head: [15,0,0],
+    // Driving upward with right fist
+    L_shoulder: [0,0,10],  L_upperArm: [50,0,0],   L_foreArm: [-60,0,0],
+    R_shoulder: [0,0,-10], R_upperArm: [-140,0,0], R_foreArm: [-20,0,0],
+    L_hip: [0,0,5],  L_thigh: [20,0,6],   L_shin: [-30,0,0],
+    R_hip: [0,0,-5], R_thigh: [-10,0,-5], R_shin: [5,0,0],
   },
 
   jump: {
-    hips:         [0, 0, 0],
-    torsoJoint:   [-5, 0, 0],
-    headJoint:    [5, 0, 0],
-    L_shoulder:   [0, 0, 15],
-    L_upperArm:   [-60, 0, 0],
-    L_foreArm:    [-30, 0, 0],
-    R_shoulder:   [0, 0,-15],
-    R_upperArm:   [-60, 0, 0],
-    R_foreArm:    [-30, 0, 0],
-    L_hip:        [0, 0, 5],
-    L_thigh:      [-30, 0, 5],
-    L_shin:       [50, 0, 0],
-    R_hip:        [0, 0,-5],
-    R_thigh:      [-30, 0,-5],
-    R_shin:       [50, 0, 0],
-    hipsY: 1.5,
+    hipsY: 1.65, returnToIdle: true, holdMs: 700, tweenInSpeed: 10,
+    hips: [0,0,0], torsoJoint: [-8,0,0], head: [8,0,0],
+    L_shoulder: [0,0,18],  L_upperArm: [-55,0,0], L_foreArm: [-40,0,0],
+    R_shoulder: [0,0,-18], R_upperArm: [-55,0,0], R_foreArm: [-40,0,0],
+    L_hip: [0,0,6],  L_thigh: [-40,0,8],  L_shin: [60,0,0],
+    R_hip: [0,0,-6], R_thigh: [-40,0,-8], R_shin: [60,0,0],
   },
 
   hadouken: {
-    hips:         [0, -20, 0],
-    torsoJoint:   [0, 10, 0],
-    headJoint:    [0, -5, 0],
-    L_shoulder:   [0, 0, 10],
-    L_upperArm:   [-60, 0, 0],
-    L_foreArm:    [-70, 0, 0],
-    R_shoulder:   [0, 0,-10],
-    R_upperArm:   [-70, 0, 0],
-    R_foreArm:    [-60, 0, 0],
-    L_hip:        [0, 0, 5],
-    L_thigh:      [20, 0, 8],
-    L_shin:       [-30, 0, 0],
-    R_hip:        [0, 0,-5],
-    R_thigh:      [10, 0,-5],
-    R_shin:       [-15, 0, 0],
-    hipsY: 0.88,
+    hipsY: 0.86, returnToIdle: true, holdMs: 650, tweenInSpeed: 14,
+    hips: [0,-25,0], torsoJoint: [0,12,0], head: [0,-8,0],
+    // Both hands thrusting forward together
+    L_shoulder: [0,0,8],   L_upperArm: [-80,0,0], L_foreArm: [-15,0,0],
+    R_shoulder: [0,0,-8],  R_upperArm: [-80,0,0], R_foreArm: [-15,0,0],
+    L_hip: [0,0,5],  L_thigh: [25,0,8],   L_shin: [-38,0,0],
+    R_hip: [0,0,-5], R_thigh: [12,0,-6],  R_shin: [-18,0,0],
   },
 };
 
-// ─── Apply pose with tween ────────────────────────────────────
-const joints = {};
-root.traverse(obj => { if (obj.name) joints[obj.name] = obj; });
-
-let currentPoseData = POSES.idle;
-let targetPoseData  = POSES.idle;
-let tweenT = 1;
-
-function setPose(name) {
-  targetPoseData = POSES[name];
-  tweenT = 0;
-}
-
-function lerp(a, b, t) { return a + (b - a) * t; }
-function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+// ─── Pose tween state ────────────────────────────────────────
+let fromPose  = POSES.idle;
+let toPose    = POSES.idle;
+let tweenT    = 1;
+let tweenSpeed = 4;
+let returnTimer = null;
+let activeBtnEl = document.querySelector('.pose-btn.active');
 
 function applyPoseInterp(t) {
   const e = easeOut(t);
-  for (const key of Object.keys(targetPoseData)) {
-    if (key === 'hipsY') {
-      hips.position.y = lerp(currentPoseData.hipsY, targetPoseData.hipsY, e);
-      continue;
-    }
+  const keys = new Set([...Object.keys(fromPose), ...Object.keys(toPose)]);
+  for (const key of keys) {
+    if (key === 'hipsY' || key === 'returnToIdle' || key === 'holdMs' || key === 'tweenInSpeed') continue;
+    if (key === 'hipsY') continue;
     const j = joints[key];
     if (!j) continue;
-    const from = currentPoseData[key] || [0,0,0];
-    const to   = targetPoseData[key]  || [0,0,0];
+    const from = fromPose[key] || [0,0,0];
+    const to   = toPose[key]   || [0,0,0];
     j.rotation.x = lerp(from[0], to[0], e) * DEG;
     j.rotation.y = lerp(from[1], to[1], e) * DEG;
     j.rotation.z = lerp(from[2], to[2], e) * DEG;
   }
+  hips.position.y = lerp(fromPose.hipsY ?? 1.0, toPose.hipsY ?? 1.0, e);
 }
 
-// ─── Orbit control (mouse + touch) ───────────────────────────
-let orbitTheta = 0, orbitPhi = 20 * DEG;
+function setPose(name, speed) {
+  clearTimeout(returnTimer);
+  const pose = POSES[name];
+  fromPose   = captureCurrent();
+  toPose     = pose;
+  tweenT     = 0;
+  tweenSpeed = speed ?? pose.tweenInSpeed ?? 5;
+
+  // Schedule return to idle for action poses
+  if (pose.returnToIdle) {
+    const snapMs   = Math.round((1 / tweenSpeed) * 1000) + (pose.holdMs ?? 400);
+    returnTimer = setTimeout(() => {
+      // Deactivate action button, re-activate idle
+      document.querySelectorAll('.pose-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('[data-pose="idle"]').classList.add('active');
+      fromPose   = captureCurrent();
+      toPose     = POSES.idle;
+      tweenT     = 0;
+      tweenSpeed = 5; // smooth return
+    }, snapMs);
+  }
+}
+
+// Snapshot current joint rotations into a pose-shaped object
+function captureCurrent() {
+  const snap = { hipsY: hips.position.y, returnToIdle: false, tweenInSpeed: 4 };
+  for (const key of Object.keys(POSES.idle)) {
+    if (key === 'hipsY' || key === 'returnToIdle' || key === 'holdMs' || key === 'tweenInSpeed') continue;
+    const j = joints[key];
+    if (!j) continue;
+    snap[key] = [j.rotation.x / DEG, j.rotation.y / DEG, j.rotation.z / DEG];
+  }
+  return snap;
+}
+
+function lerp(a, b, t)  { return a + (b - a) * t; }
+function easeOut(t)     { return 1 - Math.pow(1 - t, 3); }
+
+// Apply idle pose immediately on load
+applyPoseInterp(1);
+
+// ─── Orbit camera ────────────────────────────────────────────
+let orbitTheta  = 0;
+let orbitPhi    = 20 * DEG;
 let orbitRadius = 5.5;
 const MIN_PHI = -20 * DEG, MAX_PHI = 70 * DEG;
 const MIN_R = 2.5, MAX_R = 10;
 
 let dragging = false, lastX = 0, lastY = 0;
 
-wrap.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+wrap.addEventListener('mousedown', e => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+});
 window.addEventListener('mouseup',   () => { dragging = false; });
 window.addEventListener('mousemove', e => {
   if (!dragging) return;
   orbitTheta -= (e.clientX - lastX) * 0.008;
-  orbitPhi   -= (e.clientY - lastY) * 0.006;
-  orbitPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, orbitPhi));
+  // ↑↓ inverted: drag UP → camera goes UP
+  orbitPhi   += (e.clientY - lastY) * 0.006;
+  orbitPhi    = Math.max(MIN_PHI, Math.min(MAX_PHI, orbitPhi));
   lastX = e.clientX; lastY = e.clientY;
 });
 
@@ -507,9 +478,8 @@ wrap.addEventListener('wheel', e => {
   e.preventDefault();
 }, { passive: false });
 
-// Touch orbit
+// Touch
 let touchLast = null, pinchLast = null;
-
 wrap.addEventListener('touchstart', e => {
   e.preventDefault();
   if (e.touches.length === 1) {
@@ -529,20 +499,18 @@ wrap.addEventListener('touchmove', e => {
     const dx = e.touches[0].clientX - touchLast.x;
     const dy = e.touches[0].clientY - touchLast.y;
     orbitTheta -= dx * 0.008;
-    orbitPhi   -= dy * 0.006;
-    orbitPhi = Math.max(MIN_PHI, Math.min(MAX_PHI, orbitPhi));
+    // ↑↓ inverted
+    orbitPhi   += dy * 0.006;
+    orbitPhi    = Math.max(MIN_PHI, Math.min(MAX_PHI, orbitPhi));
     touchLast = { x: e.touches[0].clientX, y: e.touches[0].clientY };
   } else if (e.touches.length === 2 && pinchLast !== null) {
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dx   = e.touches[0].clientX - e.touches[1].clientX;
+    const dy   = e.touches[0].clientY - e.touches[1].clientY;
     const dist = Math.hypot(dx, dy);
     orbitRadius = Math.max(MIN_R, Math.min(MAX_R, orbitRadius - (dist - pinchLast) * 0.02));
     pinchLast = dist;
   }
 }, { passive: false });
-
-// ─── Idle breathing animation ─────────────────────────────────
-let breathT = 0;
 
 // ─── Resize ──────────────────────────────────────────────────
 function resize() {
@@ -554,27 +522,28 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+// ─── Idle breathing ──────────────────────────────────────────
+let breathT = 0;
+
 // ─── Render loop ─────────────────────────────────────────────
 const clock = new THREE.Clock();
-
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
 
-  // Tween pose
+  // Tween
   if (tweenT < 1) {
-    tweenT = Math.min(1, tweenT + dt * 3.5);
+    tweenT = Math.min(1, tweenT + dt * tweenSpeed);
     applyPoseInterp(tweenT);
-    if (tweenT >= 1) currentPoseData = targetPoseData;
   }
 
-  // Subtle breathing on idle joints
-  breathT += dt;
-  if (tweenT >= 1) {
-    const breath = Math.sin(breathT * 1.5) * 0.015;
-    torsoJoint.rotation.x += breath;
+  // Breathing (only in idle/guard stances when settled)
+  if (tweenT >= 1 && !toPose.returnToIdle) {
+    breathT += dt;
+    const b = Math.sin(breathT * 1.4) * 0.012;
+    torsoJoint.rotation.x += b;
   }
 
-  // Orbit camera
+  // Camera orbit
   const camX = orbitRadius * Math.sin(orbitTheta) * Math.cos(orbitPhi);
   const camY = orbitRadius * Math.sin(orbitPhi) + 1.2;
   const camZ = orbitRadius * Math.cos(orbitTheta) * Math.cos(orbitPhi);
